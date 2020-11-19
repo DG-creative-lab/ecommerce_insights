@@ -1,0 +1,277 @@
+---
+title: "Sales Performance Analysis 2010-2011"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+
+library(flexdashboard)
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+library(ggmap)
+library(knitr)
+library(leaflet)
+library(DT)
+library(sp)
+library(rnaturalearth)
+library(highcharter)
+library(shiny)
+library(factoextra)
+library(plotly)
+
+
+# import the data
+
+# import the data
+df<-read_csv("Data/Main_Dashboard_Data.csv")
+df_KMeans<-read_csv("Data/KMeans_Data.csv")
+
+                
+# amend the data types
+
+df$Price<- round(df$Price)
+
+# Map set up
+map <- ne_countries()
+#names(map)[names(map) == "iso_a3"] <- "ISO3"
+#names(map)[names(map) == "name"] <- "NAME"
+CountryData<- aggregate(Price ~ Country, df, sum)
+map$Revenue <- CountryData$Price[match(map$name, CountryData$C)]
+
+# scale the K-means data
+
+KM_df <- 
+  df_KMeans %>%
+  subset(select = - CustomerId) %>%
+  scale()
+
+
+```
+
+
+Product Performance {data-icon="fa-chart-line"} 
+==========================================================
+
+Row {data-height= 300}
+--------------------------------------
+
+### Number of Transactions
+
+```{r}
+AnnualSales <- df %>% 
+  distinct(Invoice) %>% 
+  nrow()
+valueBox(value= AnnualSales,icon = "fa-usd", caption ="Number of Transactions",color = "Coral")
+```
+
+### Gross Annual Revenue
+
+```{r}
+AnnualRevenue <- scales::dollar(sum(df$Price)-sum((filter(df,df$Quantity < 0)$Price)))
+valueBox(value = AnnualRevenue,icon = "fa-usd",caption = "Gross Annual Revenue", color = 'CornflowerBlue')
+```
+
+### Refunds
+
+```{r}
+refund <- round((sum((filter(df,df$Quantity < 0)$Price))/sum(df$Price))*100,1)
+gauge(refund, min = 0, max = 100, symbol = '%', gaugeSectors(
+  success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+))
+```
+
+Column {.sidebar data-width=100}
+-------------------------------------
+
+```{r}
+minvalue <- floor(min(map$Revenue, na.rm = TRUE))
+maxvalue <- ceiling(max(map$Revenue, na.rm = TRUE))
+sliderInput("rangevalues",
+  label = "Revenue values:",
+  min = minvalue, max = maxvalue,
+  value = c(minvalue, maxvalue)
+)
+           
+```
+
+
+Column {data-width=600}
+-------------------------------------
+    
+### Map
+    
+```{r}
+pal <- colorBin(
+  palette = "viridis", domain = map$Revenue ,
+  #bins = seq(0, max(map$Revenue, na.rm = TRUE) + 10, by = 10)
+)
+map$labels <- paste0(
+  "<strong> Country: </strong> ",
+  map$NAME, "<br/> ",
+  "<strong> Revenue: </strong> ",
+  map$Revenue , "<br/> "
+) %>%
+  lapply(htmltools::HTML)
+
+mapFiltered <- reactive({
+  rowsinrangeslider <- which(map$Revenue >= input$rangevalues[1] &
+    map$Revenue <= input$rangevalues[2])
+  map[rowsinrangeslider, ]
+})
+renderLeaflet({
+  if (nrow(mapFiltered()) == 0) {
+    return(NULL)
+  }
+leaflet(mapFiltered()) %>%
+  addTiles() %>%
+  setView(lng = 0, lat = 30, zoom = 2) %>%
+  addPolygons(
+    fillColor = ~ pal(Revenue),
+    color = "white",
+    fillOpacity = 0.7,
+    label = ~labels,
+    highlight = highlightOptions(
+      color = "black",
+      bringToFront = TRUE
+    )
+  ) %>%
+  leaflet::addLegend(
+    pal = pal, values = ~Revenue,
+    opacity = 0.7, title = "Revenue"
+  )
+})
+  
+```   
+ 
+### Table
+    
+```{r}
+revenue<- aggregate(cbind(Quantity,Price) ~ Description, df, sum)%>%
+  filter(Quantity>0 & Price>0)
+renderDT ({
+DT::datatable(revenue,
+  rownames = FALSE, options = list(
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15)
+))
+})
+  
+```
+
+Column {data-width=600}
+-------------------------------------
+
+### Revenue monthly performance
+
+```{r}
+time_revenue<-aggregate(Price ~ InvoiceDate, df, sum)
+  
+renderHighchart({
+time_revenue%>% 
+ 
+  hchart('line', hcaes(x = 'InvoiceDate', y = 'Price'))
+  
+})
+```
+
+
+### Product demand monthly performance
+
+```{r}
+time_demand<-aggregate(Quantity ~ InvoiceDate, df, sum)
+  
+renderHighchart({
+time_demand%>% 
+ 
+  hchart('line', hcaes(x = 'InvoiceDate', y = 'Quantity'))
+  
+})
+```
+   
+RFM Customer Segmentation {data-icon="fas fa-users"} 
+===================================================     
+
+Column {.sidebar data-width=100}
+-------------------------------------
+
+```{r}
+numericInput('clusters', 'Number of Segments', 3,
+              min = 2, max = 8)
+           
+```
+    
+    
+
+Row 
+-------------------------------------    
+    
+### Segments
+
+```{r}
+
+palette(c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3",
+  "#FF7F00", "#FFFF33", "#A65628", "#F781BF", "#999999"))
+
+clusters <- reactive({
+  kmeans(KM_df, input$clusters, nstart = 25)
+})
+
+renderPlot({
+  #par(mar = c(5.1, 4.1, 0, 1))
+fviz_cluster(clusters(), geom = "point", data = KM_df)
+})
+
+
+```
+
+Row 
+------------------------------------- 
+
+### Segments Summary
+
+```{r}
+# exclude the customer id column
+
+summary_K <- reactive({ df_KMeans%>%
+  subset(select = -CustomerId)%>%
+  mutate(Segment = clusters()$cluster) %>%
+  group_by(Segment) %>%
+  summarise_all(list(n="length", mean="mean"))%>%
+  subset(select = -c(recency_n, frequency_n))%>%
+  rename(segment_size = total_value_n )
+})
+
+
+# transpose the summary table to facilitate the visualisation
+summary_K_transposed <- reactive({ gather(summary_K(),
+                                   key = "feature",
+                                   value = "value",
+                                   -Segment)
+
+})
+
+renderTable({
+ head(summary_K_transposed(), n=32) 
+})
+```
+
+### Segments Visualisation
+
+```{r}
+
+ renderPlot({
+    
+  ggplot(summary_K_transposed(),aes(x=reorder(Segment,-value),y=value, fill=as.factor(Segment)))+
+  geom_col()+
+  facet_grid(.~feature)+
+  labs(x="Segments", subtitle = paste("Total N of customers: ", sum(summary_K()$segment_size)))
+})
+
+```
+
+
