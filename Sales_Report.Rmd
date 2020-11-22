@@ -2,7 +2,7 @@
 title: "Sales Performance Analysis 2010-2011"
 output: 
   flexdashboard::flex_dashboard:
-    orientation: rows
+#    orientation: rows
     vertical_layout: fill
 runtime: shiny
 ---
@@ -59,7 +59,7 @@ KM_df <-
 Product Performance {data-icon="fa-chart-line"} 
 ==========================================================
 
-Row {data-height= 300}
+Column {data-width= 200}
 --------------------------------------
 
 ### Number of Transactions
@@ -87,6 +87,26 @@ gauge(refund, min = 0, max = 100, symbol = '%', gaugeSectors(
 ))
 ```
 
+### Global Product Performance
+    
+```{r}
+revenue<- aggregate(cbind(Quantity,Price) ~ Description, dashboard_df, sum)%>%
+  filter(Quantity>0 & Price>0)
+renderDT ({
+DT::datatable(revenue,
+  colnames=c('Product Description' = 'Description', 'Revenue' = 'Price'),
+  fillContainer=TRUE,
+  rownames = FALSE, options = list(
+  pageLength = 20,
+  lengthMenu = c(10,20,50)
+))
+})
+  
+```
+
+
+
+
 Column {.sidebar data-width=100}
 -------------------------------------
 
@@ -102,7 +122,7 @@ sliderInput("rangevalues",
 ```
 
 
-Column {data-width=600}
+Row {data-height=650}
 -------------------------------------
     
 ### Map
@@ -150,22 +170,9 @@ leaflet(mapFiltered()) %>%
   
 ```   
  
-### Table
-    
-```{r}
-revenue<- aggregate(cbind(Quantity,Price) ~ Description, dashboard_df, sum)%>%
-  filter(Quantity>0 & Price>0)
-renderDT ({
-DT::datatable(revenue,
-  rownames = FALSE, options = list(
-  pageLength = 5,
-  lengthMenu = c(5, 10, 15)
-))
-})
-  
-```
 
-Column {data-width=600}
+
+Row {data-height=350}
 -------------------------------------
 
 ### Revenue monthly performance
@@ -282,7 +289,7 @@ renderTable({
 Market Analysis {data-icon="fas fa-globe"} 
 ===================================================     
   
-Column {data-width=600}
+Column {data-width= 600}
 -------------------------------------
 ### Non UK Market segment performance
   
@@ -311,8 +318,6 @@ renderPlot(segmented_noUK()%>%
   labs(title="Segments performance for the rest of the world", ylab = "Segment"))
 ```
 
-Column {data-width=600}
--------------------------------------
 ### UK Market segment performance
 
 ```{r}
@@ -327,8 +332,33 @@ renderPlot(segmented_UK()%>%
   
 ```   
  
+Column {data-width=350}
+-------------------------------------
+### Product performance per segment
+  
+```{r}
+
+segment_product <- reactive({ df_KMeans%>%
+  mutate(Segment = clusters()$cluster) %>%
+  group_by(Segment)%>%
+  inner_join(y = dashboard_df )%>%
+  filter(Quantity>0 & Price>0)%>%
+  select(Segment,Description, Price, Quantity )%>%
+  group_by(Segment,Description) %>% 
+    summarise_each(funs(sum))
+})
 
 
 
+renderDT ({
+DT::datatable(segment_product(),
+  colnames=c('Product Description' = 'Description', 'Revenue' = 'Price'),
+  fillContainer=TRUE,
+  rownames = FALSE, options = list(
+  pageLength = 20,
+  lengthMenu = c(10, 15, 20,50,100)
+))
+})
 
+```
 
