@@ -23,25 +23,27 @@ library(highcharter)
 library(shiny)
 library(factoextra)
 library(plotly)
+library(sf)
+library(tmap)
 
 
 # import the data
 
 # import the data
-df<-read_csv("Data/Main_Dashboard_Data.csv")
+dashboard_df<-read_csv("Data/Main_Dashboard_Data.csv")
 df_KMeans<-read_csv("Data/KMeans_Data.csv")
 
                 
 # amend the data types
 
-df$Price<- round(df$Price)
+dashboard_df$Price<- round(dashboard_df$Price)
 
 # Map set up
 map <- ne_countries()
 #names(map)[names(map) == "iso_a3"] <- "ISO3"
 #names(map)[names(map) == "name"] <- "NAME"
-CountryData<- aggregate(Price ~ Country, df, sum)
-map$Revenue <- CountryData$Price[match(map$name, CountryData$C)]
+CountryData<- aggregate(Price ~ Country, dashboard_df, sum)
+map$Revenue <- CountryData$Price[match(map$name, CountryData$Country)]
 
 # scale the K-means data
 
@@ -63,7 +65,7 @@ Row {data-height= 300}
 ### Number of Transactions
 
 ```{r}
-AnnualSales <- df %>% 
+AnnualSales <- dashboard_df %>% 
   distinct(Invoice) %>% 
   nrow()
 valueBox(value= AnnualSales,icon = "fa-usd", caption ="Number of Transactions",color = "Coral")
@@ -72,14 +74,14 @@ valueBox(value= AnnualSales,icon = "fa-usd", caption ="Number of Transactions",c
 ### Gross Annual Revenue
 
 ```{r}
-AnnualRevenue <- scales::dollar(sum(df$Price)-sum((filter(df,df$Quantity < 0)$Price)))
+AnnualRevenue <- scales::dollar(sum(dashboard_df$Price)-sum((filter(dashboard_df,dashboard_df$Quantity < 0)$Price)))
 valueBox(value = AnnualRevenue,icon = "fa-usd",caption = "Gross Annual Revenue", color = 'CornflowerBlue')
 ```
 
 ### Refunds
 
 ```{r}
-refund <- round((sum((filter(df,df$Quantity < 0)$Price))/sum(df$Price))*100,1)
+refund <- round((sum((filter(dashboard_df,dashboard_df$Quantity < 0)$Price))/sum(dashboard_df$Price))*100,1)
 gauge(refund, min = 0, max = 100, symbol = '%', gaugeSectors(
   success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
 ))
@@ -112,7 +114,7 @@ pal <- colorBin(
 )
 map$labels <- paste0(
   "<strong> Country: </strong> ",
-  map$NAME, "<br/> ",
+  map$name, "<br/> ",
   "<strong> Revenue: </strong> ",
   map$Revenue , "<br/> "
 ) %>%
@@ -151,7 +153,7 @@ leaflet(mapFiltered()) %>%
 ### Table
     
 ```{r}
-revenue<- aggregate(cbind(Quantity,Price) ~ Description, df, sum)%>%
+revenue<- aggregate(cbind(Quantity,Price) ~ Description, dashboard_df, sum)%>%
   filter(Quantity>0 & Price>0)
 renderDT ({
 DT::datatable(revenue,
@@ -169,7 +171,8 @@ Column {data-width=600}
 ### Revenue monthly performance
 
 ```{r}
-time_revenue<-aggregate(Price ~ InvoiceDate, df, sum)
+time_revenue<-aggregate(Price ~ InvoiceDate, dashboard_df, sum)
+  
   
 renderHighchart({
 time_revenue%>% 
@@ -183,7 +186,7 @@ time_revenue%>%
 ### Product demand monthly performance
 
 ```{r}
-time_demand<-aggregate(Quantity ~ InvoiceDate, df, sum)
+time_demand<-aggregate(Quantity ~ InvoiceDate, dashboard_df, sum)
   
 renderHighchart({
 time_demand%>% 
@@ -237,7 +240,7 @@ Row
 ```{r}
 # exclude the customer id column
 
-summary_K <- reactive({ df_KMeans%>%
+summary_K2 <- reactive({ df_KMeans%>%
   subset(select = -CustomerId)%>%
   mutate(Segment = clusters()$cluster) %>%
   group_by(Segment) %>%
@@ -248,7 +251,7 @@ summary_K <- reactive({ df_KMeans%>%
 
 
 # transpose the summary table to facilitate the visualisation
-summary_K_transposed <- reactive({ gather(summary_K(),
+summary_K_transposed2 <- reactive({ gather(summary_K2(),
                                    key = "feature",
                                    value = "value",
                                    -Segment)
@@ -256,7 +259,7 @@ summary_K_transposed <- reactive({ gather(summary_K(),
 })
 
 renderTable({
- head(summary_K_transposed(), n=32) 
+ head(summary_K_transposed2(), n=32) 
 })
 ```
 
@@ -266,12 +269,66 @@ renderTable({
 
  renderPlot({
     
-  ggplot(summary_K_transposed(),aes(x=reorder(Segment,-value),y=value, fill=as.factor(Segment)))+
+  ggplot(summary_K_transposed2(),aes(x=reorder(Segment,-value),y=value, fill=as.factor(Segment)))+
   geom_col()+
   facet_grid(.~feature)+
-  labs(x="Segments", subtitle = paste("Total N of customers: ", sum(summary_K()$segment_size)))
+  labs(x="Segments", subtitle = paste("Total N of customers: ", sum(summary_K2()$segment_size)))
 })
 
 ```
+
+
+
+Market Analysis {data-icon="fas fa-globe"} 
+===================================================     
+  
+Column {data-width=600}
+-------------------------------------
+### Non UK Market segment performance
+  
+```{r}
+
+segment_K <- reactive({ df_KMeans%>%
+  mutate(Segment = clusters()$cluster) %>%
+  group_by(Segment)%>%
+  inner_join(y = dashboard_df )%>%
+  distinct(CustomerId, .keep_all = TRUE)%>%
+  select(Segment, Country)
+})
+
+
+
+# Split the segment int o2 for UK and non-UK countries
+
+
+segmented_noUK<-reactive({segment_K()})
+
+
+renderPlot(segmented_noUK()%>%
+  filter(Country != "United Kingdom")%>%
+  ggplot(aes(Country, Segment, fill = as.factor(Segment)))+
+  geom_col()+
+  labs(title="Segments performance for the rest of the world", ylab = "Segment"))
+```
+
+Column {data-width=600}
+-------------------------------------
+### UK Market segment performance
+
+```{r}
+
+segmented_UK<-reactive({segment_K()})
+
+renderPlot(segmented_UK()%>%
+  filter(Country == "United Kingdom")%>%
+  ggplot(aes(Segment,fill = as.factor(Segment)))+
+  geom_bar()+
+  labs(title="Segments performance for UK"))
+  
+```   
+ 
+
+
+
 
 

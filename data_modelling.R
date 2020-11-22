@@ -246,6 +246,7 @@ grouped_df<- subset(grouped_df, grouped_df$frequency > (Q_frequency[1] - 1.5*iqr
 ## now you can extract a .csv of the cleaned and scaled data to use it latter in your shiny app
 
 
+
 write_csv(grouped_df, "./Data/KMeans_Data.csv") ## 3725
 
 
@@ -273,7 +274,9 @@ grouped_df_scale <-
   subset(select = - CustomerId) %>%
   scale()
 
-glimpse(grouped_df_scale)
+## now you can extract a .csv of the cleaned and scaled data to use it latter in your shiny app
+
+
 
 
 # Now we can use a heatmap to identify the existence of any correlations between the variables. 
@@ -471,7 +474,6 @@ segmented_data <-
   distinct(CustomerId, .keep_all = TRUE)
 
 # We can run some initial bar chart visualisations of the segments performance per country.
-
 
 
 segmented_data%>%
